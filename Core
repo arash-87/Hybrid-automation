@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Script by Arash // arash66@gmail.com
+# Script by // arash66@gmail.com
 
 # Requirements:
 # Run this script with Administrator privilege.
@@ -14,7 +14,7 @@ import time
 
 
 powershell_path = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" 
-ps_script_path = "C:\\Users\\arash\\Desktop\\new-login.arinda.com.au\\Certificate-changeover\\ftp-script.ps1"
+ps_script_path = "C:\\Users\\user\\Desktop\\Hybrid-automation\\powershell.ps1"
 
 #################### PowerShell function #####################     
 
