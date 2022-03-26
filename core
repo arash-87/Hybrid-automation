@@ -1,0 +1,246 @@
+#!/usr/bin/python3
+
+# Script by Arash // arash66@gmail.com
+
+# Requirements:
+# Run this script with Administrator privilege.
+# Port 8729 for site in new portal and 8728 for site in old portal must be open on the gateways
+# Files must be in the same location of the script file
+
+import routeros_api
+import subprocess
+import os   
+import time
+
+
+powershell_path = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" 
+ps_script_path = "C:\\Users\\arash\\Desktop\\new-login.arinda.com.au\\Certificate-changeover\\ftp-script.ps1"
+
+#################### PowerShell function #####################     
+
+def powershell(ps_script_path, String, site, server, script):  # SCRIPT PATH = PPowerShell script path,  String = PowerShell scipt parameters ( IF ANY )
+
+    commandline_options = [powershell_path, '-ExecutionPolicy', 'Unrestricted', ps_script_path]  # Add PowerShell EXE and execution policy 
+    for param in String: 
+        commandline_options.append("'" + param + "'")  # Append the parameters to PowerShell script
+    
+    commandline_options.append("'" + script + "'") # Send the script code to the PowerShell file
+    process_result = subprocess.run(commandline_options, stdout = subprocess.PIPE, stderr = subprocess.PIPE, universal_newlines = True)  
+
+    #print(process_result.returncode)  # PRINT RETURN CODE OF PROCESS  0 = SUCCESS, NON-ZERO = FAIL  
+    print(process_result.stdout)      # PRINT STANDARD OUTPUT FROM POWERSHELL
+    #print(process_result.stderr)      # PRINT STANDARD ERROR FROM POWERSHELL ( IF ANY OTHERWISE ITS NULL|NONE )
+
+    if process_result.returncode != 0:  
+        print(">>> The PowerShell script cannot run !\n")
+        # Print the error into the error file 
+        f = open("errors.txt", "a")
+        f.write("\nThe PowerShell script cannot run! {} | {} \n\n".format(site, server))
+        f.close()
+
+#################### API function #####################
+
+def Core(filepath):
+
+    # First open a file and read each line
+    # The format of the file: (site ip user pass)   
+    String = []     
+    with open(filepath) as lines: 
+        next(lines)
+        for line in lines: # Going through each line/site
+            for word in line.split(): # Going through word by word devided by space
+                String.append(word)
+            
+            # If one of user / pass / IP / site is missing, show an error and the line!
+            length = len(String)
+            if length < 4: 
+                print("=====================================================================================")
+                print("\n> Data in this line is incomplete: {}> File name: {}\n".format(line, filepath))
+                print("=====================================================================================\n\n")
+                break # Jump to main menu again
+
+            else:   
+                site = String[0]
+                server = String[1]
+                user = String[2]
+                passw = String[3]
+                
+                print("\n=====================================================================================")
+                print("\n        > Test the connectivity of", server ," for: ", site , "<")
+                print("         ..........................................................\n")
+                    
+                # Ping the given IP using os.system library
+                # Sending 2 echo requests // Remove NUM if you need the Ping result on the screen
+                SRV_UP = True if os.system("ping -n 2 " + server + "> NUL") == 0 else False
+                
+                # First condition triggered if a router is reachable 
+                if SRV_UP == True:
+                    print("\n> Connecting to the router...\n")
+                    
+                    try:
+                        # Estblish a connection to each router but it is based digital certificate installed on each router!       
+                        connection = routeros_api.RouterOsApiPool(server, user, passw, plaintext_login=True, use_ssl=True, ssl_verify_hostname=False, ssl_verify=True, port=8729)
+                        api = connection.get_api()
+                        print(">> Connection has been established\n")
+                        
+                        try:    
+                            list_hotspot = api.get_resource('/system/routerboard') 
+                            output = list_hotspot.get()
+                            element = str(output[0] ['upgrade-firmware']) # extracting a element/pobject in the array from MikroTik API
+                            print(">>> Firmware version: ", element)
+                            
+                            firmware1 = "6.49"
+                            firmware2 = "6.48"
+                            
+                            for i in range(10): 
+                                
+                                string1 = str(str(firmware1) + str(".") + str(i))
+                                string2 = str(str(firmware2) + str(".") + str(i))
+                               
+                                if element == firmware1 or element == firmware2 or element == string1 or element == string2:
+                                    print("\n>>> Firmware is up-to-date!\n")
+                                    script = '1'
+                                    break
+                                    
+                                else:
+                                    if i == 9: # go till 6.4(9/8).(9) to find old firmwares
+                                        print("\n>>> Firmware needs an update!\n")
+                                        
+                                        f = open("errors.txt", "a")
+                                        f.write("\nFirmware is old and needs an update: {} | {} \n".format(site, server))
+                                        f.close()
+                                        script = '0'
+                                        break
+                                    else: i += 1 
+                                       
+                            connection.disconnect()
+                            
+							#Execute the PowerShell function
+                            powershell(ps_script_path, String, site, server, script) 
+                            time.sleep(2)
+                            
+                        # An exception that logs and prints when an error happned in try section
+                        except Exception as Argument:
+                            print("\n>>> The given argument is wrong or doesn't exist in your MikroTik: {} | {} \n".format(site, server))              
+                            # Print inside error.txt file if any errors for invalid credentials 
+                            f = open("errors.txt", "a")
+                            f.write("\nThe given argument is wrong or doesn't exist in your MikroTik: {} | {} \n".format(site, server))
+                            f.close()
+                            String.clear() 
+                            print("=====================================================================================\n\n") 
+
+                    # An exception that logs and prints when an error happned in try section
+                    except Exception as Argument:
+                        print("\n>>>> Invalid User/Password or port (8729) isn't open on router/firewall: {} | {} \n".format(site, server))
+                        
+                        # Print inside error.txt file if any errors for invalid credentials 
+                        f = open("errors.txt", "a")
+                        f.write("\nInvalid User/Password or port (8729) isn't open on router/firewall: {} | {} \n".format(name, server))
+                        f.close()
+                        String.clear() 
+                        print("=====================================================================================\n")                          
+ 
+                    try:
+                    
+                        # Estblish a connection to each router to chk weather the script file successfully run or not!      
+                        connection = routeros_api.RouterOsApiPool(server, user, passw, plaintext_login=True, use_ssl=True, ssl_verify_hostname=False, ssl_verify=True, port=8729)
+                        api = connection.get_api()
+                        
+                        # Find a installed certificate based on name (id = 4, but the array starts from 0)
+                        list_hotspot = api.get_resource('/certificate')
+                        output = list_hotspot.get() 
+                        element = str(output[3] ['name']) # extracting a element/pobject in the array from MikroTik API
+                        if element == "login.arinda.com.au.crt" or element == "login.arinda.com.au.crt_0" :
+                            print(">>> New certificate are in place: ", element)
+                            
+                        else:
+                            print(">>> New certificates are not installed!")    
+                            f = open("errors.txt", "a")
+                            f.write("\nNew certificates are not installed in: {} | {} \n".format(site, server))
+                            f.close()
+                                      
+                        connection.disconnect()
+                        String.clear()         
+                        print("=====================================================================================\n\n")   
+                                                        
+                    except Exception as Argument:
+                        print(">>>> Cannt connect to the router again, Something is missing for: {} | {} \n".format(site, server))
+                        f = open("errors.txt", "a")
+                        f.write("\nCannt connect to the router again, Something is missing for: {} | {} \n".format(site, server))
+                        f.close()
+                        String.clear() 
+                        
+                # If there is no connectin to a gateway, print time out
+                if SRV_UP == False: 
+                    print("                            -------------------")
+                    print("                           |   >> TIME OUT <<  |")
+                    print("                            -------------------")
+                    print("\n=====================================================================================\n\n")
+                    # Print the unreachable cases into a file 
+                    f = open("errors.txt", "a")
+                    f.write("\nThis site/IP is unreachable: {} | {} \n\n".format(site, server))
+                    f.close()
+                    String.clear() 
+                    
+        time.sleep(3)              
+
+#################### Input file check function #####################
+
+def filechk(filepath):
+    # 1st check whether the file exists or not       
+    if os.path.isfile(filepath): 
+        # 2nd check whether the file is empty or not
+        if os.stat(filepath).st_size == 0:
+            print("\n> No data is in: ", filepath)
+        else:
+            Core(filepath) # Call main/API function
+    else:  
+        print("\n> No file with this name!", filepath)
+        
+        
+#################### Menu #####################
+
+def menu():
+	print("\n###################           MikroTik API remote controller        #####################")
+	print("###################                                                 #####################")
+	print("                   |                  Site lists                    |")
+	print("                   |             1) Sites in Melbourne              |")
+	print("                   |             2) Sites in Sydney                 |")
+	print("                   |             3) Sites in Brisbane               |")
+	print("                   |             4) Sites in Adelaide               |")
+	print("                   |             5) Exit                            |")
+	print("                    ------------------------------------------------")   
+	
+	
+######################## Inputs #############################
+
+# This loop read data from keyboard
+while True:
+
+    menu()
+    value = input("\n> Enter a number to apply change for .... :  ")
+
+    if value == '1':
+        filepath = '.\ip-list.txt'
+        ssl = True # If connection is based on SSL use port 8729
+        filechk(filepath, ssl) # Call File-check function
+            
+    elif value == '2':
+        filepath = '.\ip-list2.txt'
+        ssl = False # If connection is not based SSL use port 8728 
+        filechk(filepath, ssl)  
+
+    elif value == '3':
+        #filepath = '.\ip-list3.txt'
+        ssl = True
+        filechk(filepath, ssl)   
+         
+    elif value == '4':
+        #filepath = '.\ip-list4.txt'
+        ssl = False
+        filechk(filepath, ssl)          
+            
+    elif value == '6':
+        break    
+
+input('\n> Press Enter to exit: ')
